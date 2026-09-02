@@ -3,7 +3,6 @@ import sys
 import tempfile
 import streamlit as st
 import librosa
-import soundfile as sf
 import numpy as np
 import pyloudnorm as pyln
 from scipy.signal import find_peaks, butter, filtfilt
@@ -157,40 +156,6 @@ def get_badge(subscore):
     else:
         return "🔴 FIX NEEDED", "#EF4444"
 
-# Synthetic audio generator for testing without external files
-def generate_synthetic_sample(sample_type):
-    sr = 22050
-    duration = 10.0
-    t = np.linspace(0, duration, int(sr * duration), endpoint=False)
-    
-    # Base voice tone (fundamental + harmonics)
-    speech = (
-        0.35 * np.sin(2 * np.pi * 150 * t) +
-        0.25 * np.sin(2 * np.pi * 300 * t) +
-        0.20 * np.sin(2 * np.pi * 1800 * t) +
-        0.15 * np.sin(2 * np.pi * 3200 * t)
-    )
-    # Natural amplitude modulation (pauses & cadence)
-    envelope = np.maximum(0, np.sin(2 * np.pi * 2.0 * t))
-    y = speech * envelope
-    
-    if sample_type == "clean":
-        # Add tiny room tone (-65 dB)
-        noise = np.random.normal(0, 0.0005, len(t))
-        y = y + noise
-        y = y * 0.7  # ~ -20 LUFS
-    elif sample_type == "clipped":
-        # Heavy amplification causing digital clipping
-        y = np.clip(y * 4.5, -1.0, 1.0)
-    elif sample_type == "noisy":
-        # Loud room/fan noise (-42 dB)
-        noise = np.random.normal(0, 0.015, len(t))
-        y = y * 0.5 + noise
-    
-    tfile = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-    sf.write(tfile.name, y, sr)
-    return tfile.name
-
 # Sidebar Navigation
 with st.sidebar:
     st.markdown("## 🎧 Navigation")
@@ -236,44 +201,23 @@ if app_mode == "🔍 Audio Quality Auditor":
     st.markdown('<div class="main-title">🎧 Audiobook Quality Auditor</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-title">Instant, Objective DSP Quality Screening for AWGP Audio Editors & Narrators</div>', unsafe_allow_html=True)
     
-    tab_upload, tab_synth = st.tabs(["📁 Upload Audio File (WAV, MP3, M4A, FLAC)", "🧪 Instant Test Profiles"])
-    
     audio_path = None
     file_info = None
     
-    with tab_upload:
-        st.markdown("**Drag and drop your recorded or mastered chapter file to screen against Audible ACX / EBU R128 standards:**")
-        uploaded_file = st.file_uploader("Upload Audio Track", type=["wav", "mp3", "m4a", "flac", "ogg", "aac", "wma"])
-        if uploaded_file is not None:
-            tfile = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1])
-            tfile.write(uploaded_file.read())
-            tfile.flush()
-            audio_path = tfile.name
-            file_info = {
-                "name": uploaded_file.name,
-                "size_mb": len(uploaded_file.getvalue()) / (1024 * 1024)
-            }
-
-    with tab_synth:
-        st.markdown("**Test the auditor with built-in instant acoustic profiles:**")
-        demo_choice = st.radio(
-            "Select a test profile to evaluate:",
-            [
-                "🟢 Clean Studio Voice Profile (Low noise, proper LUFS, 0 clips)",
-                "🔴 Clipped & Saturated Profile (Heavily distorted peaks)",
-                "🟠 High Noise Floor Profile (Room drone and electrical hiss)"
-            ]
-        )
-        if st.button("▶️ Load & Audit Test Profile"):
-            if "Clean Studio" in demo_choice:
-                audio_path = generate_synthetic_sample("clean")
-                file_info = {"name": "Synthetic_Clean_Studio.wav", "size_mb": 0.4}
-            elif "Clipped" in demo_choice:
-                audio_path = generate_synthetic_sample("clipped")
-                file_info = {"name": "Synthetic_Clipped_Distorted.wav", "size_mb": 0.4}
-            else:
-                audio_path = generate_synthetic_sample("noisy")
-                file_info = {"name": "Synthetic_High_Noise.wav", "size_mb": 0.4}
+    st.markdown("**Drag and drop your recorded or mastered chapter file to screen against Audible ACX / EBU R128 standards:**")
+    uploaded_file = st.file_uploader(
+        "Upload Audio Track (WAV, MP3, M4A, FLAC, OGG, AAC)",
+        type=["wav", "mp3", "m4a", "flac", "ogg", "aac", "wma"]
+    )
+    if uploaded_file is not None:
+        tfile = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1])
+        tfile.write(uploaded_file.read())
+        tfile.flush()
+        audio_path = tfile.name
+        file_info = {
+            "name": uploaded_file.name,
+            "size_mb": len(uploaded_file.getvalue()) / (1024 * 1024)
+        }
 
     if audio_path and os.path.exists(audio_path):
         st.markdown("---")
