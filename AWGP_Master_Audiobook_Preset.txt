@@ -1,0 +1,4 @@
+SelectAll:
+HighPassFilter:frequency="80" rolloff="dB12"
+LoudnessNormalization:DualMono="1" LUFSLevel="-20" NormalizeTo="LUFS" RMSLevel="-20" StereoIndependent="0"
+Limiter:gain-L="0" gain-R="0" hold="10" limit="-3" makeup="No" thresh="-3" type="SoftLimit"
