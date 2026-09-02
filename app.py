@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import subprocess
+import yt_dlp
 import streamlit as st
 import librosa
 import numpy as np
@@ -210,14 +211,30 @@ if app_mode == "🔍 Audio Quality Auditor":
         yt_url = st.text_input("YouTube Video URL", placeholder="https://www.youtube.com/watch?v=...")
         if st.button("📥 Download & Audit Audio") and yt_url:
             with st.spinner("Fetching and extracting audio from YouTube..."):
-                tfile = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-                tfile.close()
-                cmd = ["venv/bin/yt-dlp", "-f", "bestaudio", "-x", "--audio-format", "wav", yt_url, "-o", tfile.name]
-                res = subprocess.run(cmd, capture_output=True)
-                if os.path.exists(tfile.name) and os.path.getsize(tfile.name) > 1000:
-                    audio_path = tfile.name
-                else:
-                    st.error("Could not fetch YouTube audio. Please check the link.")
+                try:
+                    temp_dir = tempfile.mkdtemp()
+                    out_template = os.path.join(temp_dir, "audio.%(ext)s")
+                    ydl_opts = {
+                        'format': 'bestaudio/best',
+                        'postprocessors': [{
+                            'key': 'FFmpegExtractAudio',
+                            'preferredcodec': 'wav',
+                        }],
+                        'outtmpl': out_template,
+                        'quiet': True,
+                        'no_warnings': True,
+                        'noplaylist': True,
+                    }
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        ydl.download([yt_url.strip()])
+                    
+                    target_wav = os.path.join(temp_dir, "audio.wav")
+                    if os.path.exists(target_wav) and os.path.getsize(target_wav) > 1000:
+                        audio_path = target_wav
+                    else:
+                        st.error("Could not fetch YouTube audio. Please check the link.")
+                except Exception as ex:
+                    st.error(f"Error downloading YouTube audio: {ex}")
 
     with tab_demo:
         DEMOS = {
