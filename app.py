@@ -1,10 +1,9 @@
 import os
 import sys
 import tempfile
-import subprocess
-import yt_dlp
 import streamlit as st
 import librosa
+import soundfile as sf
 import numpy as np
 import pyloudnorm as pyln
 from scipy.signal import find_peaks, butter, filtfilt
@@ -74,12 +73,21 @@ st.markdown("""
         border-radius: 6px;
         margin-bottom: 12px;
     }
+    .file-meta-box {
+        background: #F3F4F6;
+        border-radius: 8px;
+        padding: 12px 18px;
+        margin-bottom: 15px;
+        font-size: 0.92rem;
+        color: #374151;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # Macro content definition
 MACRO_CONTENT = """SelectAll:
 HighPassFilter:frequency="80" rolloff="dB12"
+FilterCurve:f0="20" f1="80" f2="2500" f3="3500" f4="5000" f5="10000" f6="20000" v0="-24" v1="0" v2="0" v3="2.5" v4="2.5" v5="0" v6="0"
 LoudnessNormalization:DualMono="1" LUFSLevel="-20" NormalizeTo="LUFS" RMSLevel="-20" StereoIndependent="0"
 Limiter:gain-L="0" gain-R="0" hold="10" limit="-3" makeup="No" thresh="-3" type="SoftLimit"
 """
@@ -149,39 +157,39 @@ def get_badge(subscore):
     else:
         return "🔴 FIX NEEDED", "#EF4444"
 
-def fetch_youtube_audio(url):
-    try:
-        temp_dir = tempfile.mkdtemp()
-        out_template = os.path.join(temp_dir, "audio.%(ext)s")
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'wav',
-            }],
-            'outtmpl': out_template,
-            'quiet': True,
-            'no_warnings': True,
-            'noplaylist': True,
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['android', 'ios', 'mweb', 'web']
-                }
-            },
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            }
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url.strip()])
-        
-        target_wav = os.path.join(temp_dir, "audio.wav")
-        if os.path.exists(target_wav) and os.path.getsize(target_wav) > 1000:
-            return target_wav
-        return None
-    except Exception as ex:
-        st.error(f"Error fetching YouTube audio: {ex}")
-        return None
+# Synthetic audio generator for testing without external files
+def generate_synthetic_sample(sample_type):
+    sr = 22050
+    duration = 10.0
+    t = np.linspace(0, duration, int(sr * duration), endpoint=False)
+    
+    # Base voice tone (fundamental + harmonics)
+    speech = (
+        0.35 * np.sin(2 * np.pi * 150 * t) +
+        0.25 * np.sin(2 * np.pi * 300 * t) +
+        0.20 * np.sin(2 * np.pi * 1800 * t) +
+        0.15 * np.sin(2 * np.pi * 3200 * t)
+    )
+    # Natural amplitude modulation (pauses & cadence)
+    envelope = np.maximum(0, np.sin(2 * np.pi * 2.0 * t))
+    y = speech * envelope
+    
+    if sample_type == "clean":
+        # Add tiny room tone (-65 dB)
+        noise = np.random.normal(0, 0.0005, len(t))
+        y = y + noise
+        y = y * 0.7  # ~ -20 LUFS
+    elif sample_type == "clipped":
+        # Heavy amplification causing digital clipping
+        y = np.clip(y * 4.5, -1.0, 1.0)
+    elif sample_type == "noisy":
+        # Loud room/fan noise (-42 dB)
+        noise = np.random.normal(0, 0.015, len(t))
+        y = y * 0.5 + noise
+    
+    tfile = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+    sf.write(tfile.name, y, sr)
+    return tfile.name
 
 # Sidebar Navigation
 with st.sidebar:
@@ -226,84 +234,58 @@ with st.sidebar:
 # ==============================================================================
 if app_mode == "🔍 Audio Quality Auditor":
     st.markdown('<div class="main-title">🎧 Audiobook Quality Auditor</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-title">Instant, Objective DSP Quality Screening for AWGP Editors & Narrators</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-title">Instant, Objective DSP Quality Screening for AWGP Audio Editors & Narrators</div>', unsafe_allow_html=True)
     
-    tab_upload, tab_yt, tab_demo = st.tabs(["📁 Upload Audio File", "🔗 YouTube Link (AWGP / Any)", "📚 Quick Benchmark Samples"])
+    tab_upload, tab_synth = st.tabs(["📁 Upload Audio File (WAV, MP3, M4A, FLAC)", "🧪 Instant Test Profiles"])
     
     audio_path = None
+    file_info = None
     
     with tab_upload:
-        uploaded_file = st.file_uploader("Upload your recorded chapter (MP3, WAV, M4A, FLAC, OGG)", type=["mp3", "wav", "m4a", "flac", "ogg"])
+        st.markdown("**Drag and drop your recorded or mastered chapter file to screen against Audible ACX / EBU R128 standards:**")
+        uploaded_file = st.file_uploader("Upload Audio Track", type=["wav", "mp3", "m4a", "flac", "ogg", "aac", "wma"])
         if uploaded_file is not None:
             tfile = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1])
             tfile.write(uploaded_file.read())
             tfile.flush()
             audio_path = tfile.name
-
-    with tab_yt:
-        st.markdown("**Paste any YouTube URL from [@Shantikunjvideo_Audio_Books](https://www.youtube.com/@Shantikunjvideo_Audio_Books), [@yagyavalkyanewsletter6311](https://www.youtube.com/@yagyavalkyanewsletter6311), or any other source:**")
-        yt_url = st.text_input("YouTube Video URL", placeholder="https://www.youtube.com/watch?v=...")
-        if st.button("📥 Download & Audit Audio") and yt_url:
-            with st.spinner("Fetching and extracting audio from YouTube..."):
-                audio_path = fetch_youtube_audio(yt_url.strip())
-                if not audio_path:
-                    st.error("Could not fetch YouTube audio. Please verify the URL.")
-
-    with tab_demo:
-        DEMOS = {
-            "Select a pre-loaded sample...": None,
-            "🏆 Pro Grade (98/100): Audible ACX Official Tips": {
-                "url": "https://www.youtube.com/watch?v=XvIdC56hHVo",
-                "file": "audio_XvIdC56hHVo.wav"
-            },
-            "🏆 Pro Grade (97/100): Elmer Gantry Audiobook": {
-                "url": "https://www.youtube.com/watch?v=VVxug7cVLa0",
-                "file": "audio_VVxug7cVLa0.wav"
-            },
-            "🏆 Pro Grade (96/100): Stephen Fry - Odyssey": {
-                "url": "https://www.youtube.com/watch?v=ENzUY8c98Zw",
-                "file": "audio_ENzUY8c98Zw.wav"
-            },
-            "🌟 Yagyavalkya Top (87/100): Karmakanda Pradeep (Odia)": {
-                "url": "https://www.youtube.com/watch?v=3x-Sww8Ah5A",
-                "file": "audio_3x-Sww8Ah5A.wav"
-            },
-            "🌟 Yagyavalkya (83/100): Gayatri Mahavigyan Pt-1": {
-                "url": "https://www.youtube.com/watch?v=OC6ah1Z6nXI",
-                "file": "audio_OC6ah1Z6nXI.wav"
-            },
-            "🌟 AWGP Top (84/100): Gayatri Sadhana Process": {
-                "url": "https://www.youtube.com/watch?v=6gjejRSuvpQ",
-                "file": "audio_6gjejRSuvpQ.wav"
-            },
-            "🌟 AWGP (81/100): Women's Right to Gayatri": {
-                "url": "https://www.youtube.com/watch?v=8RCRci9nv1E",
-                "file": "audio_8RCRci9nv1E.wav"
-            },
-            "⚠️ AWGP Needs Fix (68/100): Marriage - Sacred Union": {
-                "url": "https://www.youtube.com/watch?v=6Ul43m6mBJI",
-                "file": "audio_6Ul43m6mBJI.wav"
-            },
-            "❌ AWGP Clipped (35/100): Ishwar Kaun Hai": {
-                "url": "https://www.youtube.com/watch?v=LhTOMA9mMdg",
-                "file": "audio_LhTOMA9mMdg.wav"
-            },
-            "❌ AWGP Distorted (29/100): Gayatri Mahatmya (37k Clips)": {
-                "url": "https://www.youtube.com/watch?v=BGnmVkD8KmU",
-                "file": "audio_BGnmVkD8KmU.wav"
+            file_info = {
+                "name": uploaded_file.name,
+                "size_mb": len(uploaded_file.getvalue()) / (1024 * 1024)
             }
-        }
-        chosen_demo = st.selectbox("Benchmark Demo:", list(DEMOS.keys()))
-        if chosen_demo and DEMOS[chosen_demo]:
-            demo_info = DEMOS[chosen_demo]
-            if os.path.exists(demo_info["file"]):
-                audio_path = demo_info["file"]
+
+    with tab_synth:
+        st.markdown("**Test the auditor with built-in instant acoustic profiles:**")
+        demo_choice = st.radio(
+            "Select a test profile to evaluate:",
+            [
+                "🟢 Clean Studio Voice Profile (Low noise, proper LUFS, 0 clips)",
+                "🔴 Clipped & Saturated Profile (Heavily distorted peaks)",
+                "🟠 High Noise Floor Profile (Room drone and electrical hiss)"
+            ]
+        )
+        if st.button("▶️ Load & Audit Test Profile"):
+            if "Clean Studio" in demo_choice:
+                audio_path = generate_synthetic_sample("clean")
+                file_info = {"name": "Synthetic_Clean_Studio.wav", "size_mb": 0.4}
+            elif "Clipped" in demo_choice:
+                audio_path = generate_synthetic_sample("clipped")
+                file_info = {"name": "Synthetic_Clipped_Distorted.wav", "size_mb": 0.4}
             else:
-                with st.spinner(f"Loading benchmark audio '{chosen_demo}'..."):
-                    audio_path = fetch_youtube_audio(demo_info["url"])
+                audio_path = generate_synthetic_sample("noisy")
+                file_info = {"name": "Synthetic_High_Noise.wav", "size_mb": 0.4}
 
     if audio_path and os.path.exists(audio_path):
+        st.markdown("---")
+        if file_info:
+            st.markdown(f"""
+            <div class="file-meta-box">
+                📁 <strong>Audited File:</strong> <code>{file_info['name']}</code> &nbsp;|&nbsp; <strong>File Size:</strong> {file_info['size_mb']:.2f} MB
+            </div>
+            """, unsafe_allow_html=True)
+        
         st.audio(audio_path)
+        
         with st.spinner("Analyzing DSP acoustic parameters..."):
             try:
                 y, sr = librosa.load(audio_path, sr=None, duration=300)
@@ -313,7 +295,6 @@ if app_mode == "🔍 Audio Quality Auditor":
                 score = None
 
         if score is not None:
-            st.markdown("---")
             col_score, col_bars = st.columns([1.1, 2.1])
             
             with col_score:
@@ -378,9 +359,9 @@ if app_mode == "🔍 Audio Quality Auditor":
             
             fixes = []
             if subscores["clips"] < 0.85:
-                fixes.append(("⚡ Digital Clipping Detected", f"Found **{metrics['clips']} clipped samples**. In Audacity: Apply `Effect -> Limiter (Soft Limit to -3.0 dB)` before exporting. During recording: Lower microphone input gain."))
+                fixes.append(("⚡ Digital Clipping Detected", f"Found **{metrics['clips']} clipped samples**. In Audacity: Apply `Effect -> Limiter (Soft Limit to -3.0 dB)` before exporting. During recording: Lower microphone input gain on audio interface."))
             if subscores["clarity"] < 0.85:
-                fixes.append(("🎙️ Muffled Vocal Formants", f"Formant clarity is **{metrics['vocal_clarity']:.1f}%** (target is ≥9.5%). In Audacity: Apply `Effect -> Filter Curve EQ` and boost +2.5 dB between 2.5 kHz and 5.0 kHz. Narrator should speak 4-6 inches from mic."))
+                fixes.append(("🎙️ Muffled Vocal Formants", f"Formant clarity is **{metrics['vocal_clarity']:.1f}%** (target is ≥9.5%). In Audacity: Apply `Effect -> Filter Curve EQ` and boost +2.5 dB between 2.5 kHz and 5.0 kHz. Narrator should speak 4-6 inches from condenser mic."))
             if subscores["noise_floor"] < 0.85:
                 fixes.append(("🤫 Audible Background Hiss", f"Pause noise floor is **{metrics['noise_floor']:.1f} dBFS** (target is ≤ -58 dBFS). Turn off room fans/AC; in Audacity, apply `Effect -> Noise Reduction` (select 2s pause profile, apply 8 dB reduction)."))
             if subscores["lufs"] < 0.85:
@@ -594,24 +575,24 @@ elif app_mode == "📖 Parameter Guide & Step-by-Step Fixes":
 # ==============================================================================
 elif app_mode == "🏆 Reference Hall of Fame (Top Audiobooks)":
     st.markdown('<div class="main-title">🏆 Audiobook Quality Hall of Fame</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-title">Top Performing Audiobooks Organized by Acoustic Category & Aspect</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-title">Top Performing Audiobooks Across AWGP, Yagyavalkya, and Global Publishing Channels</div>', unsafe_allow_html=True)
     
     tab_awgp_leaders, tab_aspect_leaders, tab_all_table = st.tabs([
         "🌟 Top AWGP & Yagyavalkya Audiobooks",
         "🎖️ Best-in-Class by Feature",
-        "📊 Complete Multi-Channel Benchmark"
+        "📊 Complete 25-Audiobook Benchmark Scorecard"
     ])
     
     with tab_awgp_leaders:
         st.markdown("### 🌟 Best Performing Shantikunj & Yagyavalkya Audiobooks")
-        st.markdown("These audiobooks represent the highest technical benchmarks currently in the AWGP and Yagyavalkya catalogs:")
+        st.markdown("Click directly on any title to listen on YouTube:")
         
         col1, col2 = st.columns(2)
         
         with col1:
             st.markdown("""
             <div class="card">
-                <h4 style="color:#1E3A8A; margin:0;">1. Karmakanda Pradeep (Odia)</h4>
+                <h4 style="color:#1E3A8A; margin:0;"><a href="https://www.youtube.com/watch?v=3x-Sww8Ah5A" target="_blank" style="text-decoration:none; color:#1E3A8A;">1. Karmakanda Pradeep (Odia) ↗</a></h4>
                 <p style="color:#64748B; font-size:0.9rem;">Yagyavalkya Channel • 8,200 Views</p>
                 <div style="font-size:1.8rem; font-weight:800; color:#10B981;">87.2 / 100 <span style="font-size:1rem;">🟢 PRO GRADE</span></div>
                 <ul style="font-size:0.9rem; color:#374151; margin-top:8px;">
@@ -619,13 +600,13 @@ elif app_mode == "🏆 Reference Hall of Fame (Top Audiobooks)":
                     <li><strong>Vocal Clarity</strong>: 🟢 13.4% (Studio quality presence)</li>
                     <li><strong>Headroom</strong>: 🟢 0 clipped samples</li>
                 </ul>
-                <a href="https://www.youtube.com/watch?v=3x-Sww8Ah5A" target="_blank">🔗 Watch on YouTube</a>
+                <a href="https://www.youtube.com/watch?v=3x-Sww8Ah5A" target="_blank" style="font-weight:600; color:#2563EB;">▶️ Open Video on YouTube</a>
             </div>
             """, unsafe_allow_html=True)
             
             st.markdown("""
             <div class="card">
-                <h4 style="color:#1E3A8A; margin:0;">2. Gayatri Sadhana Process</h4>
+                <h4 style="color:#1E3A8A; margin:0;"><a href="https://www.youtube.com/watch?v=6gjejRSuvpQ" target="_blank" style="text-decoration:none; color:#1E3A8A;">2. Gayatri Sadhana Process ↗</a></h4>
                 <p style="color:#64748B; font-size:0.9rem;">AWGP Shantikunj Official Channel</p>
                 <div style="font-size:1.8rem; font-weight:800; color:#10B981;">83.5 / 100 <span style="font-size:1rem;">🟡 GOOD</span></div>
                 <ul style="font-size:0.9rem; color:#374151; margin-top:8px;">
@@ -633,14 +614,14 @@ elif app_mode == "🏆 Reference Hall of Fame (Top Audiobooks)":
                     <li><strong>Loudness</strong>: 🟢 -23.0 LUFS (ACX compliant)</li>
                     <li><strong>Headroom</strong>: 🟢 0 clipped samples</li>
                 </ul>
-                <a href="https://www.youtube.com/watch?v=6gjejRSuvpQ" target="_blank">🔗 Watch on YouTube</a>
+                <a href="https://www.youtube.com/watch?v=6gjejRSuvpQ" target="_blank" style="font-weight:600; color:#2563EB;">▶️ Open Video on YouTube</a>
             </div>
             """, unsafe_allow_html=True)
 
         with col2:
             st.markdown("""
             <div class="card">
-                <h4 style="color:#1E3A8A; margin:0;">3. Gayatri Mahavigyan Pt-1 (Part 01)</h4>
+                <h4 style="color:#1E3A8A; margin:0;"><a href="https://www.youtube.com/watch?v=OC6ah1Z6nXI" target="_blank" style="text-decoration:none; color:#1E3A8A;">3. Gayatri Mahavigyan Pt-1 (Part 01) ↗</a></h4>
                 <p style="color:#64748B; font-size:0.9rem;">Yagyavalkya Channel • 18,000 Views</p>
                 <div style="font-size:1.8rem; font-weight:800; color:#10B981;">82.9 / 100 <span style="font-size:1rem;">🟡 GOOD</span></div>
                 <ul style="font-size:0.9rem; color:#374151; margin-top:8px;">
@@ -648,13 +629,13 @@ elif app_mode == "🏆 Reference Hall of Fame (Top Audiobooks)":
                     <li><strong>Noise Floor</strong>: 🟢 -63.5 dBFS (Clean studio tone)</li>
                     <li><strong>Pacing</strong>: 🟢 142 WPM (Natural storytelling tempo)</li>
                 </ul>
-                <a href="https://www.youtube.com/watch?v=OC6ah1Z6nXI" target="_blank">🔗 Watch on YouTube</a>
+                <a href="https://www.youtube.com/watch?v=OC6ah1Z6nXI" target="_blank" style="font-weight:600; color:#2563EB;">▶️ Open Video on YouTube</a>
             </div>
             """, unsafe_allow_html=True)
 
             st.markdown("""
             <div class="card">
-                <h4 style="color:#1E3A8A; margin:0;">4. Women's Right to Gayatri</h4>
+                <h4 style="color:#1E3A8A; margin:0;"><a href="https://www.youtube.com/watch?v=8RCRci9nv1E" target="_blank" style="text-decoration:none; color:#1E3A8A;">4. Women's Right to Gayatri ↗</a></h4>
                 <p style="color:#64748B; font-size:0.9rem;">AWGP Shantikunj Official Channel</p>
                 <div style="font-size:1.8rem; font-weight:800; color:#10B981;">80.5 / 100 <span style="font-size:1rem;">🟡 GOOD</span></div>
                 <ul style="font-size:0.9rem; color:#374151; margin-top:8px;">
@@ -662,7 +643,7 @@ elif app_mode == "🏆 Reference Hall of Fame (Top Audiobooks)":
                     <li><strong>Loudness</strong>: 🟢 -23.3 LUFS (ACX compliant)</li>
                     <li><strong>Headroom</strong>: 🟢 0 clipped samples</li>
                 </ul>
-                <a href="https://www.youtube.com/watch?v=8RCRci9nv1E" target="_blank">🔗 Watch on YouTube</a>
+                <a href="https://www.youtube.com/watch?v=8RCRci9nv1E" target="_blank" style="font-weight:600; color:#2563EB;">▶️ Open Video on YouTube</a>
             </div>
             """, unsafe_allow_html=True)
 
@@ -673,68 +654,81 @@ elif app_mode == "🏆 Reference Hall of Fame (Top Audiobooks)":
         with c_a:
             st.markdown("""
             **1. 🤫 Best Background Silence / Noise Floor:**
-            * 🥇 **Karmakanda Pradeep (Odia)**: `-94.3 dBFS` 🟢 (Yagyavalkya)
-            * 🥈 **जीवन देवता की साधना आराधना**: `-78.3 dBFS` 🟢 (AWGP)
-            * 🥉 **Elmer Gantry Audiobook**: `-70.2 dBFS` 🟢 (Pro Reference)
+            * 🥇 [**Karmakanda Pradeep (Odia)**](https://www.youtube.com/watch?v=3x-Sww8Ah5A): `-94.3 dBFS` 🟢 (Yagyavalkya)
+            * 🥈 [**जीवन देवता की साधना आराधना**](https://www.youtube.com/watch?v=IOhueHD3rBE): `-78.3 dBFS` 🟢 (AWGP)
+            * 🥉 [**Elmer Gantry Audiobook**](https://www.youtube.com/watch?v=VVxug7cVLa0): `-70.2 dBFS` 🟢 (Pro Reference)
             
             ---
             **2. 🎙️ Best Vocal Formant Clarity (1-4 kHz):**
-            * 🥇 **Gayatri Mahavigyan Pt-1 (Part 01)**: `15.3%` 🟢 (Yagyavalkya)
-            * 🥈 **Christopher Lee - Tell-Tale Heart**: `14.2%` 🟢 (Pro Reference)
-            * 🥉 **Karmakanda Pradeep (Odia)**: `13.4%` 🟢 (Yagyavalkya)
+            * 🥇 [**Gayatri Mahavigyan Pt-1 (Part 01)**](https://www.youtube.com/watch?v=OC6ah1Z6nXI): `15.3%` 🟢 (Yagyavalkya)
+            * 🥈 [**Christopher Lee - Tell-Tale Heart**](https://www.youtube.com/watch?v=Z_utA6j3Oc8): `14.2%` 🟢 (Pro Reference)
+            * 🥉 [**Karmakanda Pradeep (Odia)**](https://www.youtube.com/watch?v=3x-Sww8Ah5A): `13.4%` 🟢 (Yagyavalkya)
             
             ---
             **3. ⚡ Perfect Digital Headroom (0 Clips):**
-            * 🏆 **All 6 Pro Reference Standards** (0 clips)
-            * 🏆 **Gayatri Mahavigyan Pt-1 & Pt-2** (0 clips)
-            * 🏆 **Gayatri Sadhana Process** (0 clips)
+            * 🏆 [**Audible ACX Official Tips**](https://www.youtube.com/watch?v=XvIdC56hHVo) (0 clips)
+            * 🏆 [**Gayatri Mahavigyan Pt-1**](https://www.youtube.com/watch?v=OC6ah1Z6nXI) (0 clips)
+            * 🏆 [**Gayatri Sadhana Process**](https://www.youtube.com/watch?v=6gjejRSuvpQ) (0 clips)
             """)
             
         with c_b:
             st.markdown("""
             **4. 🔊 Best Standardized Loudness (LUFS):**
-            * 🥇 **Audible ACX Official Tips**: `-21.7 LUFS` 🟢
-            * 🥈 **Stephen Fry - Odyssey**: `-21.6 LUFS` 🟢
-            * 🥉 **Gayatri Sadhana Process**: `-23.0 LUFS` 🟢
+            * 🥇 [**Audible ACX Official Tips**](https://www.youtube.com/watch?v=XvIdC56hHVo): `-21.7 LUFS` 🟢
+            * 🥈 [**Stephen Fry - Odyssey**](https://www.youtube.com/watch?v=ENzUY8c98Zw): `-21.6 LUFS` 🟢
+            * 🥉 [**Gayatri Sadhana Process**](https://www.youtube.com/watch?v=6gjejRSuvpQ): `-23.0 LUFS` 🟢
             
             ---
             **5. ⏱️ Best Narrative Pacing & Reading Tempo:**
-            * 🥇 **Audible ACX Official Tips**: `125 WPM` 🟢 (Natural storytelling)
-            * 🥈 **सफल जीवन की दिशाधारा**: `131 WPM` 🟢 (Clear articulation)
-            * 🥉 **Gayatri Mahavigyan Pt-1**: `142 WPM` 🟢 (Comfortable tempo)
+            * 🥇 [**Audible ACX Official Tips**](https://www.youtube.com/watch?v=XvIdC56hHVo): `125 WPM` 🟢 (Natural storytelling)
+            * 🥈 [**सफल जीवन की दिशाधारा**](https://www.youtube.com/watch?v=IlN0cNEe_6A): `131 WPM` 🟢 (Clear articulation)
+            * 🥉 [**Gayatri Mahavigyan Pt-1**](https://www.youtube.com/watch?v=OC6ah1Z6nXI): `142 WPM` 🟢 (Comfortable tempo)
             
             ---
             **6. 🎭 Highest Dynamic Life & Theatrical Expression:**
-            * 🥇 **Stephen Fry - Odyssey**: `19.1 LU` 🟢 (World-class voice acting)
-            * 🥈 **Christopher Lee - Tell-Tale Heart**: `16.7 LU` 🟢
-            * 🥉 **Audible ACX Official Tips**: `16.2 LU` 🟢
+            * 🥇 [**Stephen Fry - Odyssey**](https://www.youtube.com/watch?v=ENzUY8c98Zw): `19.1 LU` 🟢 (World-class voice acting)
+            * 🥈 [**Christopher Lee - Tell-Tale Heart**](https://www.youtube.com/watch?v=Z_utA6j3Oc8): `16.7 LU` 🟢
+            * 🥉 [**Audible ACX Official Tips**](https://www.youtube.com/watch?v=XvIdC56hHVo): `16.2 LU` 🟢
             """)
 
     with tab_all_table:
         st.markdown("### 📊 Complete 25-Audiobook Benchmark Scorecard")
-        st.markdown("Full results from the automated DSP engine across all audited channels:")
+        st.markdown("Click on any audiobook title to listen directly on YouTube:")
         
-        st.table([
-            {"Category": "Pro", "Title": "Audible ACX Tips", "Score": "97.9", "Clips": "0", "Noise Floor": "-60.2 dB", "Clarity": "11.5%", "LUFS": "-21.7", "WPM": "125", "Rating": "🟢 PRO GRADE"},
-            {"Category": "Pro", "Title": "Elmer Gantry", "Score": "97.9", "Clips": "0", "Noise Floor": "-70.2 dB", "Clarity": "10.9%", "LUFS": "-23.0", "WPM": "110", "Rating": "🟢 PRO GRADE"},
-            {"Category": "Pro", "Title": "Stephen Fry - Odyssey", "Score": "96.3", "Clips": "0", "Noise Floor": "-67.9 dB", "Clarity": "11.9%", "LUFS": "-21.6", "WPM": "88", "Rating": "🟢 PRO GRADE"},
-            {"Category": "Pro", "Title": "Christopher Lee", "Score": "90.4", "Clips": "0", "Noise Floor": "-64.7 dB", "Clarity": "14.2%", "LUFS": "-28.8", "WPM": "134", "Rating": "🟢 PRO GRADE"},
-            {"Category": "Pro", "Title": "Penguin Audio (N. Dormer)", "Score": "87.6", "Clips": "0", "Noise Floor": "-160.0 dB", "Clarity": "9.0%", "LUFS": "-25.9", "WPM": "136", "Rating": "🟢 PRO GRADE"},
-            {"Category": "Yagya", "Title": "Karmakanda Pradeep", "Score": "87.2", "Clips": "0", "Noise Floor": "-94.3 dB", "Clarity": "13.4%", "LUFS": "-28.0", "WPM": "155", "Rating": "🟢 PRO GRADE"},
-            {"Category": "AWGP", "Title": "Gayatri Sadhana Process", "Score": "83.5", "Clips": "0", "Noise Floor": "-71.0 dB", "Clarity": "8.7%", "LUFS": "-23.0", "WPM": "177", "Rating": "🟡 GOOD"},
-            {"Category": "Yagya", "Title": "Gayatri Mahavigyan Pt-1 (01)", "Score": "82.9", "Clips": "0", "Noise Floor": "-63.5 dB", "Clarity": "15.3%", "LUFS": "-12.7", "WPM": "142", "Rating": "🟡 GOOD"},
-            {"Category": "Yagya", "Title": "सफल जीवन की दिशाधारा", "Score": "82.0", "Clips": "0", "Noise Floor": "-65.7 dB", "Clarity": "4.3%", "LUFS": "-24.1", "WPM": "131", "Rating": "🟡 GOOD"},
-            {"Category": "AWGP", "Title": "Women's Right to Gayatri", "Score": "80.5", "Clips": "0", "Noise Floor": "-66.3 dB", "Clarity": "7.5%", "LUFS": "-23.3", "WPM": "172", "Rating": "🟡 GOOD"},
-            {"Category": "AWGP", "Title": "Day-1 जीवन जीने की कला", "Score": "77.9", "Clips": "0", "Noise Floor": "-62.4 dB", "Clarity": "8.4%", "LUFS": "-27.2", "WPM": "153", "Rating": "🟡 GOOD"},
-            {"Category": "AWGP", "Title": "गहना कर्मणोगतिः", "Score": "77.8", "Clips": "0", "Noise Floor": "-59.9 dB", "Clarity": "5.2%", "LUFS": "-23.8", "WPM": "143", "Rating": "🟡 GOOD"},
-            {"Category": "AWGP", "Title": "Marriage: A Sacred Union", "Score": "67.8", "Clips": "3", "Noise Floor": "-52.1 dB", "Clarity": "4.8%", "LUFS": "-22.2", "WPM": "161", "Rating": "🟠 FAIR"},
-            {"Category": "AWGP", "Title": "Honesty: Surest Policy", "Score": "56.2", "Clips": "0", "Noise Floor": "-49.4 dB", "Clarity": "5.1%", "LUFS": "-27.3", "WPM": "172", "Rating": "🟠 FAIR"},
-            {"Category": "AWGP", "Title": "योग के नाम पर मायाचार", "Score": "52.3", "Clips": "671", "Noise Floor": "-61.3 dB", "Clarity": "7.9%", "LUFS": "-16.1", "WPM": "185", "Rating": "🟠 FAIR"},
-            {"Category": "AWGP", "Title": "बुढ़ापे से टक्कर लीजिए", "Score": "42.5", "Clips": "6,653", "Noise Floor": "-67.2 dB", "Clarity": "5.3%", "LUFS": "-12.7", "WPM": "165", "Rating": "🔴 POOR"},
-            {"Category": "AWGP", "Title": "ईश्वर कौन है?", "Score": "35.0", "Clips": "13,510", "Noise Floor": "-56.2 dB", "Clarity": "4.3%", "LUFS": "-14.2", "WPM": "180", "Rating": "🔴 POOR"},
-            {"Category": "AWGP", "Title": "मस्तिष्क प्रत्यक्ष कल्पवृक्ष", "Score": "33.7", "Clips": "14,762", "Noise Floor": "-56.6 dB", "Clarity": "4.3%", "LUFS": "-12.7", "WPM": "182", "Rating": "🔴 POOR"},
-            {"Category": "AWGP", "Title": "गायत्री माहात्म्य", "Score": "28.9", "Clips": "37,962", "Noise Floor": "-47.4 dB", "Clarity": "3.2%", "LUFS": "-12.3", "WPM": "156", "Rating": "🔴 POOR"}
-        ])
+        benchmark_data = [
+            {"Category": "Pro", "Title": "[Audible ACX Official Tips](https://www.youtube.com/watch?v=XvIdC56hHVo)", "Score": "**97.9**", "Clips": "0", "Noise Floor": "-60.2 dB", "Clarity": "11.5%", "LUFS": "-21.7", "WPM": "125", "Rating": "🟢 PRO GRADE"},
+            {"Category": "Pro", "Title": "[Elmer Gantry Audiobook](https://www.youtube.com/watch?v=VVxug7cVLa0)", "Score": "**97.9**", "Clips": "0", "Noise Floor": "-70.2 dB", "Clarity": "10.9%", "LUFS": "-23.0", "WPM": "110", "Rating": "🟢 PRO GRADE"},
+            {"Category": "Pro", "Title": "[Stephen Fry - Odyssey](https://www.youtube.com/watch?v=ENzUY8c98Zw)", "Score": "**96.3**", "Clips": "0", "Noise Floor": "-67.9 dB", "Clarity": "11.9%", "LUFS": "-21.6", "WPM": "88", "Rating": "🟢 PRO GRADE"},
+            {"Category": "Pro", "Title": "[Christopher Lee - Tell-Tale Heart](https://www.youtube.com/watch?v=Z_utA6j3Oc8)", "Score": "**90.4**", "Clips": "0", "Noise Floor": "-64.7 dB", "Clarity": "14.2%", "LUFS": "-28.8", "WPM": "134", "Rating": "🟢 PRO GRADE"},
+            {"Category": "Pro", "Title": "[Penguin Audio (Natalie Dormer)](https://www.youtube.com/watch?v=XNuaseHTX98)", "Score": "**87.6**", "Clips": "0", "Noise Floor": "-160.0 dB", "Clarity": "9.0%", "LUFS": "-25.9", "WPM": "136", "Rating": "🟢 PRO GRADE"},
+            {"Category": "Pro", "Title": "[Neil Gaiman - American Gods](https://www.youtube.com/watch?v=-x7J-D4dtns)", "Score": "**83.5**", "Clips": "0", "Noise Floor": "-69.4 dB", "Clarity": "7.1%", "LUFS": "-27.0", "WPM": "118", "Rating": "🟡 GOOD"},
+            {"Category": "Yagya", "Title": "[Karmakanda Pradeep (Odia)](https://www.youtube.com/watch?v=3x-Sww8Ah5A)", "Score": "**87.2**", "Clips": "0", "Noise Floor": "-94.3 dB", "Clarity": "13.4%", "LUFS": "-28.0", "WPM": "155", "Rating": "🟢 PRO GRADE"},
+            {"Category": "Yagya", "Title": "[Gayatri Mahavigyan Pt-1 (01)](https://www.youtube.com/watch?v=OC6ah1Z6nXI)", "Score": "**82.9**", "Clips": "0", "Noise Floor": "-63.5 dB", "Clarity": "15.3%", "LUFS": "-12.7", "WPM": "142", "Rating": "🟡 GOOD"},
+            {"Category": "Yagya", "Title": "[सफल जीवन की दिशाधारा](https://www.youtube.com/watch?v=IlN0cNEe_6A)", "Score": "**82.0**", "Clips": "0", "Noise Floor": "-65.7 dB", "Clarity": "4.3%", "LUFS": "-24.1", "WPM": "131", "Rating": "🟡 GOOD"},
+            {"Category": "Yagya", "Title": "[Gayatri Mahavigyan Pt-1 (02)](https://www.youtube.com/watch?v=-3FPoQ0lNlo)", "Score": "**77.9**", "Clips": "0", "Noise Floor": "-56.5 dB", "Clarity": "10.4%", "LUFS": "-12.7", "WPM": "147", "Rating": "🟡 GOOD"},
+            {"Category": "Yagya", "Title": "[हर सुबह नया जन्म हर रात नई मौत](https://www.youtube.com/watch?v=G6lIgpnblcA)", "Score": "**45.0**", "Clips": "0", "Noise Floor": "-41.3 dB", "Clarity": "7.2%", "LUFS": "-17.7", "WPM": "154", "Rating": "🔴 POOR"},
+            {"Category": "AWGP", "Title": "[Gayatri Sadhana Process](https://www.youtube.com/watch?v=6gjejRSuvpQ)", "Score": "**83.5**", "Clips": "0", "Noise Floor": "-71.0 dB", "Clarity": "8.7%", "LUFS": "-23.0", "WPM": "177", "Rating": "🟡 GOOD"},
+            {"Category": "AWGP", "Title": "[Women's Right to Gayatri](https://www.youtube.com/watch?v=8RCRci9nv1E)", "Score": "**80.5**", "Clips": "0", "Noise Floor": "-66.3 dB", "Clarity": "7.5%", "LUFS": "-23.3", "WPM": "172", "Rating": "🟡 GOOD"},
+            {"Category": "AWGP", "Title": "[Day-1 जीवन जीने की कला](https://www.youtube.com/watch?v=4Qp80cEG9Mw)", "Score": "**77.9**", "Clips": "0", "Noise Floor": "-62.4 dB", "Clarity": "8.4%", "LUFS": "-27.2", "WPM": "153", "Rating": "🟡 GOOD"},
+            {"Category": "AWGP", "Title": "[गहना कर्मणोगतिः](https://www.youtube.com/watch?v=-xsOl340NAg)", "Score": "**77.8**", "Clips": "0", "Noise Floor": "-59.9 dB", "Clarity": "5.2%", "LUFS": "-23.8", "WPM": "143", "Rating": "🟡 GOOD"},
+            {"Category": "AWGP", "Title": "[Marriage: A Sacred Union](https://www.youtube.com/watch?v=6Ul43m6mBJI)", "Score": "**67.8**", "Clips": "3", "Noise Floor": "-52.1 dB", "Clarity": "4.8%", "LUFS": "-22.2", "WPM": "161", "Rating": "🟠 FAIR"},
+            {"Category": "AWGP", "Title": "[Honesty: Surest Policy](https://www.youtube.com/watch?v=de9oNT3UWrw)", "Score": "**56.2**", "Clips": "0", "Noise Floor": "-49.4 dB", "Clarity": "5.1%", "LUFS": "-27.3", "WPM": "172", "Rating": "🟠 FAIR"},
+            {"Category": "AWGP", "Title": "[योग के नाम पर मायाचार](https://www.youtube.com/watch?v=IAHK2Sqnj74)", "Score": "**52.3**", "Clips": "671", "Noise Floor": "-61.3 dB", "Clarity": "7.9%", "LUFS": "-16.1", "WPM": "185", "Rating": "🟠 FAIR"},
+            {"Category": "AWGP", "Title": "[जीवन देवता की साधना](https://www.youtube.com/watch?v=IOhueHD3rBE)", "Score": "**45.0**", "Clips": "4,438", "Noise Floor": "-78.3 dB", "Clarity": "6.8%", "LUFS": "-14.0", "WPM": "164", "Rating": "🔴 POOR"},
+            {"Category": "AWGP", "Title": "[बुढ़ापे से टक्कर लीजिए](https://www.youtube.com/watch?v=MJLn0FaXLKI)", "Score": "**42.5**", "Clips": "6,653", "Noise Floor": "-67.2 dB", "Clarity": "5.3%", "LUFS": "-12.7", "WPM": "165", "Rating": "🔴 POOR"},
+            {"Category": "AWGP", "Title": "[ईश्वर कौन है?](https://www.youtube.com/watch?v=LhTOMA9mMdg)", "Score": "**35.0**", "Clips": "13,510", "Noise Floor": "-56.2 dB", "Clarity": "4.3%", "LUFS": "-14.2", "WPM": "180", "Rating": "🔴 POOR"},
+            {"Category": "AWGP", "Title": "[मस्तिष्क प्रत्यक्ष कल्पवृक्ष](https://www.youtube.com/watch?v=vcXp9Iopx60)", "Score": "**33.7**", "Clips": "14,762", "Noise Floor": "-56.6 dB", "Clarity": "4.3%", "LUFS": "-12.7", "WPM": "182", "Rating": "🔴 POOR"},
+            {"Category": "AWGP", "Title": "[मैं क्या हूँ?](https://www.youtube.com/watch?v=DJJny0NvTxY)", "Score": "**30.0**", "Clips": "4,901", "Noise Floor": "-34.4 dB", "Clarity": "3.6%", "LUFS": "-15.2", "WPM": "147", "Rating": "🔴 POOR"},
+            {"Category": "AWGP", "Title": "[गायत्री माहात्म्य](https://www.youtube.com/watch?v=BGnmVkD8KmU)", "Score": "**28.9**", "Clips": "37,962", "Noise Floor": "-47.4 dB", "Clarity": "3.2%", "LUFS": "-12.3", "WPM": "156", "Rating": "🔴 POOR"},
+            {"Category": "Amateur", "Title": "[Dangerously Confident](https://www.youtube.com/watch?v=u4T96FEqk9U)", "Score": "**79.9**", "Clips": "0", "Noise Floor": "-66.0 dB", "Clarity": "4.9%", "LUFS": "-20.3", "WPM": "157", "Rating": "🟡 GOOD"}
+        ]
+        
+        # Format table with Markdown links
+        table_md = "| Category | Audiobook Title | Listener Score | Sound Cracking | Noise Floor | Vocal Clarity | Master Volume | Reading Speed | Quality Rating |\n"
+        table_md += "| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- |\n"
+        for row in benchmark_data:
+            table_md += f"| {row['Category']} | {row['Title']} | {row['Score']} | {row['Clips']} | {row['Noise Floor']} | {row['Clarity']} | {row['LUFS']} | {row['WPM']} | {row['Rating']} |\n"
+        st.markdown(table_md)
 
 # ==============================================================================
 # 4. PAGE: AUDACITY 1-CLICK MACRO & PRESETS
@@ -745,9 +739,15 @@ elif app_mode == "📋 1-Click Audacity Macro & Presets":
     
     st.markdown("""
     <div class="macro-box">
-        <h3 style="color:#1D4ED8; margin-top:0;">⚡ Official 1-Click Audacity Macro</h3>
+        <h3 style="color:#1D4ED8; margin-top:0;">⚡ Official 1-Click Audacity Master Macro</h3>
         <p style="color:#374151; margin-bottom:15px;">
-        This downloadable macro automatically runs the full 4-step professional mastering chain in Audacity (High-pass rumble filter, Loudness Normalization to -20 LUFS, and Soft Limiter at -3.0 dB) in <strong>less than 2 seconds</strong>.
+        This downloadable macro runs the full professional mastering chain in Audacity:
+        <ol style="margin-top:6px;">
+            <li><strong>High-Pass Filter</strong> ($80\\text{ Hz}$) — Strips sub-bass room rumble and mic thumps.</li>
+            <li><strong>Filter Curve EQ</strong> — Boosts vocal formant clarity ($+2.5\\text{ dB}$ at $2.5-5\\text{ kHz}$).</li>
+            <li><strong>Loudness Normalization</strong> — Sets exact Audible ACX target ($-20.0\\text{ LUFS}$).</li>
+            <li><strong>Soft Limiter</strong> ($-3.0\\text{ dB}$) — Guarantees 0 clipped samples permanently.</li>
+        </ol>
         </p>
     </div>
     """, unsafe_allow_html=True)
@@ -777,7 +777,7 @@ elif app_mode == "📋 1-Click Audacity Macro & Presets":
     4. **Step 4: Run with 1-Click on Any Chapter**  
        Open your recorded audiobook chapter in Audacity $\\rightarrow$ Go to **Tools $\\rightarrow$ Apply Macro $\\rightarrow$ select 'AWGP_Master_Audiobook_Preset'**.
        
-    5. **Result**: Your audio is instantly cleaned of rumble, brought to exact **$-20.0\\text{ LUFS}$** volume, and capped with **$0\\text{ clipped samples}$**!
+    5. **Result**: Your audio is instantly cleaned of rumble, enhanced for vocal presence, brought to exact **$-20.0\\text{ LUFS}$** volume, and capped with **$0\\text{ clipped samples}$**!
     """)
     
     st.markdown("---")
@@ -795,12 +795,17 @@ elif app_mode == "📋 1-Click Audacity Macro & Presets":
     </div>
     
     <div class="step-box">
-        <h4 style="color:#15803D; margin:0;">3. Loudness Normalization to -20.0 LUFS</h4>
+        <h4 style="color:#15803D; margin:0;">3. Filter Curve Vocal Formant EQ (+2.5 dB at 2.5–5 kHz)</h4>
+        <p style="margin:4px 0 0 0; color:#374151;"><code>FilterCurve: ...</code> lifts the presence band so speech consonants sound crisp and intelligible.</p>
+    </div>
+    
+    <div class="step-box">
+        <h4 style="color:#15803D; margin:0;">4. Loudness Normalization to -20.0 LUFS</h4>
         <p style="margin:4px 0 0 0; color:#374151;"><code>LoudnessNormalization: LUFSLevel="-20"</code> locks the volume to the ACX/Audible broadcast standard.</p>
     </div>
     
     <div class="step-box">
-        <h4 style="color:#15803D; margin:0;">4. Soft Limiter (-3.0 dB Peak)</h4>
+        <h4 style="color:#15803D; margin:0;">5. Soft Limiter (-3.0 dB Peak)</h4>
         <p style="margin:4px 0 0 0; color:#374151;"><code>Limiter: limit="-3" type="SoftLimit"</code> eliminates all digital clipping and distortion permanently.</p>
     </div>
     """, unsafe_allow_html=True)
