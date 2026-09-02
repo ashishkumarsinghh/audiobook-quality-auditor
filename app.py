@@ -149,6 +149,40 @@ def get_badge(subscore):
     else:
         return "🔴 FIX NEEDED", "#EF4444"
 
+def fetch_youtube_audio(url):
+    try:
+        temp_dir = tempfile.mkdtemp()
+        out_template = os.path.join(temp_dir, "audio.%(ext)s")
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'wav',
+            }],
+            'outtmpl': out_template,
+            'quiet': True,
+            'no_warnings': True,
+            'noplaylist': True,
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'ios', 'mweb', 'web']
+                }
+            },
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            }
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url.strip()])
+        
+        target_wav = os.path.join(temp_dir, "audio.wav")
+        if os.path.exists(target_wav) and os.path.getsize(target_wav) > 1000:
+            return target_wav
+        return None
+    except Exception as ex:
+        st.error(f"Error fetching YouTube audio: {ex}")
+        return None
+
 # Sidebar Navigation
 with st.sidebar:
     st.markdown("## 🎧 Navigation")
@@ -211,58 +245,64 @@ if app_mode == "🔍 Audio Quality Auditor":
         yt_url = st.text_input("YouTube Video URL", placeholder="https://www.youtube.com/watch?v=...")
         if st.button("📥 Download & Audit Audio") and yt_url:
             with st.spinner("Fetching and extracting audio from YouTube..."):
-                try:
-                    temp_dir = tempfile.mkdtemp()
-                    out_template = os.path.join(temp_dir, "audio.%(ext)s")
-                    ydl_opts = {
-                        'format': 'bestaudio/best',
-                        'postprocessors': [{
-                            'key': 'FFmpegExtractAudio',
-                            'preferredcodec': 'wav',
-                        }],
-                        'outtmpl': out_template,
-                        'quiet': True,
-                        'no_warnings': True,
-                        'noplaylist': True,
-                        'extractor_args': {
-                            'youtube': {
-                                'player_client': ['android', 'ios', 'mweb', 'web']
-                            }
-                        },
-                        'http_headers': {
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                        }
-                    }
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        ydl.download([yt_url.strip()])
-                    
-                    target_wav = os.path.join(temp_dir, "audio.wav")
-                    if os.path.exists(target_wav) and os.path.getsize(target_wav) > 1000:
-                        audio_path = target_wav
-                    else:
-                        st.error("Could not fetch YouTube audio. Please check the link.")
-                except Exception as ex:
-                    st.error(f"Error downloading YouTube audio: {ex}")
+                audio_path = fetch_youtube_audio(yt_url.strip())
+                if not audio_path:
+                    st.error("Could not fetch YouTube audio. Please verify the URL.")
 
     with tab_demo:
         DEMOS = {
             "Select a pre-loaded sample...": None,
-            "🏆 Pro Grade (98/100): Audible ACX Official Tips": "audio_XvIdC56hHVo.wav",
-            "🏆 Pro Grade (97/100): Elmer Gantry Audiobook": "audio_VVxug7cVLa0.wav",
-            "🏆 Pro Grade (96/100): Stephen Fry - Odyssey": "audio_ENzUY8c98Zw.wav",
-            "🌟 Yagyavalkya Top (87/100): Karmakanda Pradeep (Odia)": "audio_3x-Sww8Ah5A.wav",
-            "🌟 Yagyavalkya (83/100): Gayatri Mahavigyan Pt-1": "audio_OC6ah1Z6nXI.wav",
-            "🌟 AWGP Top (84/100): Gayatri Sadhana Process": "audio_6gjejRSuvpQ.wav",
-            "🌟 AWGP (81/100): Women's Right to Gayatri": "audio_8RCRci9nv1E.wav",
-            "⚠️ AWGP Needs Fix (68/100): Marriage - Sacred Union": "audio_6Ul43m6mBJI.wav",
-            "❌ AWGP Clipped (35/100): Ishwar Kaun Hai": "audio_LhTOMA9mMdg.wav",
-            "❌ AWGP Distorted (29/100): Gayatri Mahatmya (37k Clips)": "audio_BGnmVkD8KmU.wav"
+            "🏆 Pro Grade (98/100): Audible ACX Official Tips": {
+                "url": "https://www.youtube.com/watch?v=XvIdC56hHVo",
+                "file": "audio_XvIdC56hHVo.wav"
+            },
+            "🏆 Pro Grade (97/100): Elmer Gantry Audiobook": {
+                "url": "https://www.youtube.com/watch?v=VVxug7cVLa0",
+                "file": "audio_VVxug7cVLa0.wav"
+            },
+            "🏆 Pro Grade (96/100): Stephen Fry - Odyssey": {
+                "url": "https://www.youtube.com/watch?v=ENzUY8c98Zw",
+                "file": "audio_ENzUY8c98Zw.wav"
+            },
+            "🌟 Yagyavalkya Top (87/100): Karmakanda Pradeep (Odia)": {
+                "url": "https://www.youtube.com/watch?v=3x-Sww8Ah5A",
+                "file": "audio_3x-Sww8Ah5A.wav"
+            },
+            "🌟 Yagyavalkya (83/100): Gayatri Mahavigyan Pt-1": {
+                "url": "https://www.youtube.com/watch?v=OC6ah1Z6nXI",
+                "file": "audio_OC6ah1Z6nXI.wav"
+            },
+            "🌟 AWGP Top (84/100): Gayatri Sadhana Process": {
+                "url": "https://www.youtube.com/watch?v=6gjejRSuvpQ",
+                "file": "audio_6gjejRSuvpQ.wav"
+            },
+            "🌟 AWGP (81/100): Women's Right to Gayatri": {
+                "url": "https://www.youtube.com/watch?v=8RCRci9nv1E",
+                "file": "audio_8RCRci9nv1E.wav"
+            },
+            "⚠️ AWGP Needs Fix (68/100): Marriage - Sacred Union": {
+                "url": "https://www.youtube.com/watch?v=6Ul43m6mBJI",
+                "file": "audio_6Ul43m6mBJI.wav"
+            },
+            "❌ AWGP Clipped (35/100): Ishwar Kaun Hai": {
+                "url": "https://www.youtube.com/watch?v=LhTOMA9mMdg",
+                "file": "audio_LhTOMA9mMdg.wav"
+            },
+            "❌ AWGP Distorted (29/100): Gayatri Mahatmya (37k Clips)": {
+                "url": "https://www.youtube.com/watch?v=BGnmVkD8KmU",
+                "file": "audio_BGnmVkD8KmU.wav"
+            }
         }
         chosen_demo = st.selectbox("Benchmark Demo:", list(DEMOS.keys()))
         if chosen_demo and DEMOS[chosen_demo]:
-            audio_path = DEMOS[chosen_demo]
+            demo_info = DEMOS[chosen_demo]
+            if os.path.exists(demo_info["file"]):
+                audio_path = demo_info["file"]
+            else:
+                with st.spinner(f"Loading benchmark audio '{chosen_demo}'..."):
+                    audio_path = fetch_youtube_audio(demo_info["url"])
 
-    if audio_path:
+    if audio_path and os.path.exists(audio_path):
         st.audio(audio_path)
         with st.spinner("Analyzing DSP acoustic parameters..."):
             try:
