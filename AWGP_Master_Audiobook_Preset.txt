@@ -1,5 +1,4 @@
 SelectAll:
-HighPassFilter:frequency="80" rolloff="dB12"
-FilterCurve:f0="20" f1="80" f2="2500" f3="3500" f4="5000" f5="10000" f6="20000" v0="-24" v1="0" v2="0" v3="2.5" v4="2.5" v5="0" v6="0"
+High-passFilter:frequency="80" rolloff="dB12"
 LoudnessNormalization:DualMono="1" LUFSLevel="-20" NormalizeTo="LUFS" RMSLevel="-20" StereoIndependent="0"
 Limiter:gain-L="0" gain-R="0" hold="10" limit="-3" makeup="No" thresh="-3" type="SoftLimit"
