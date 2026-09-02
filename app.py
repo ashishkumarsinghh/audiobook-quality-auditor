@@ -155,6 +155,21 @@ def get_badge(subscore):
     else:
         return "🔴 FIX NEEDED", "#EF4444"
 
+import glob
+import io
+
+def cleanup_old_temp_files():
+    temp_dir = tempfile.gettempdir()
+    for pattern in ["*.wav", "*.mp3", "*.m4a", "*.flac", "*.ogg", "*.aac", "*.tmp"]:
+        for f in glob.glob(os.path.join(temp_dir, pattern)):
+            try:
+                os.remove(f)
+            except Exception:
+                pass
+
+# Clean old temporary files on startup
+cleanup_old_temp_files()
+
 # Sidebar Navigation
 with st.sidebar:
     st.markdown("## 🎧 Navigation")
@@ -209,33 +224,46 @@ if app_mode == "🔍 Audio Quality Auditor":
         type=["wav", "mp3", "m4a", "flac", "ogg", "aac", "wma"]
     )
     if uploaded_file is not None:
-        tfile = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1])
-        tfile.write(uploaded_file.read())
-        tfile.flush()
-        audio_path = tfile.name
+        audio_bytes = uploaded_file.getvalue()
         file_info = {
             "name": uploaded_file.name,
-            "size_mb": len(uploaded_file.getvalue()) / (1024 * 1024)
+            "size_mb": len(audio_bytes) / (1024 * 1024)
         }
-
-    if audio_path and os.path.exists(audio_path):
+        
         st.markdown("---")
-        if file_info:
-            st.markdown(f"""
-            <div class="file-meta-box">
-                📁 <strong>Audited File:</strong> <code>{file_info['name']}</code> &nbsp;|&nbsp; <strong>File Size:</strong> {file_info['size_mb']:.2f} MB
-            </div>
-            """, unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="file-meta-box">
+            📁 <strong>Audited File:</strong> <code>{file_info['name']}</code> &nbsp;|&nbsp; <strong>File Size:</strong> {file_info['size_mb']:.2f} MB
+        </div>
+        """, unsafe_allow_html=True)
         
-        st.audio(audio_path)
+        # Audio player plays directly from in-memory bytes (0 disk storage)
+        st.audio(audio_bytes)
         
-        with st.spinner("Analyzing DSP acoustic parameters..."):
-            try:
-                y, sr = librosa.load(audio_path, sr=None, duration=300)
+        # Load audio into RAM and immediately delete temp file
+        temp_path = None
+        y, sr = None, None
+        try:
+            suffix = os.path.splitext(uploaded_file.name)[1]
+            tfile = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+            tfile.write(audio_bytes)
+            tfile.flush()
+            tfile.close()
+            temp_path = tfile.name
+            
+            with st.spinner("Analyzing DSP acoustic parameters..."):
+                y, sr = librosa.load(temp_path, sr=None, duration=300)
                 metrics, score, subscores = analyze_audio_data(y, sr)
-            except Exception as e:
-                st.error(f"Error analyzing audio: {e}")
-                score = None
+        except Exception as e:
+            st.error(f"Error analyzing audio: {e}")
+            score = None
+        finally:
+            # Guarantee immediate deletion from disk
+            if temp_path and os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except Exception:
+                    pass
 
         if score is not None:
             col_score, col_bars = st.columns([1.1, 2.1])
