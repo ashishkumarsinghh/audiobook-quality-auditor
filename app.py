@@ -1,3 +1,12 @@
+from audio_tools.engine import (
+    robust_load_audio,
+    analyze_mic_check,
+    validate_platform_compliance,
+    analyze_pauses_and_silences,
+    auto_master_audio,
+    tag_audiobook_file,
+    PLATFORM_STANDARDS
+)
 import os
 import sys
 import tempfile
@@ -173,13 +182,19 @@ cleanup_old_temp_files()
 # Sidebar Navigation
 with st.sidebar:
     st.markdown("## 🎧 Navigation")
+    st.markdown("### 🎙️ Production Workflow")
     app_mode = st.radio(
-        "Go to section:",
+        "Workflow Stage / Tool:",
         [
-            "🔍 Audio Quality Auditor",
-            "📖 Parameter Guide & Step-by-Step Fixes",
-            "🏆 Reference Hall of Fame (Top Audiobooks)",
-            "📋 1-Click Audacity Macro & Presets"
+            "STAGE 1: 🎙️ Pre-Flight Mic & Room Check",
+            "STAGE 2: 🔍 Raw Recording Quality Auditor",
+            "STAGE 3: ⏱️ Silence & Pause Rhythm Inspector",
+            "STAGE 4: 🎚️ 1-Click DSP Master & De-Noise",
+            "STAGE 5: 📊 Multi-Platform Compliance Matrix",
+            "STAGE 6: 🏷️ Metadata & Chapter Tagging Studio",
+            "📚 Knowledge: Parameter Guide & Fixes",
+            "🏆 Knowledge: Reference Hall of Fame",
+            "📋 Preset: 1-Click Audacity Macro"
         ]
     )
     
@@ -211,7 +226,7 @@ with st.sidebar:
 # ==============================================================================
 # 1. PAGE: AUDIO QUALITY AUDITOR
 # ==============================================================================
-if app_mode == "🔍 Audio Quality Auditor":
+if app_mode == "STAGE 2: 🔍 Raw Recording Quality Auditor":
     st.markdown('<div class="main-title">🎧 Audiobook Quality Auditor</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-title">Instant, Objective DSP Quality Screening for AWGP Audio Editors & Narrators</div>', unsafe_allow_html=True)
     
@@ -252,7 +267,7 @@ if app_mode == "🔍 Audio Quality Auditor":
             temp_path = tfile.name
             
             with st.spinner("Analyzing DSP acoustic parameters..."):
-                y, sr = librosa.load(temp_path, sr=None, duration=300)
+                y, sr = robust_load_audio(temp_path, sr=None, max_duration=300)
                 metrics, score, subscores = analyze_audio_data(y, sr)
         except Exception as e:
             st.error(f"Error analyzing audio: {e}")
@@ -367,7 +382,7 @@ if app_mode == "🔍 Audio Quality Auditor":
 # ==============================================================================
 # 2. PAGE: PARAMETER GUIDE & STEP-BY-STEP FIXES
 # ==============================================================================
-elif app_mode == "📖 Parameter Guide & Step-by-Step Fixes":
+elif app_mode == "📚 Knowledge: Parameter Guide & Fixes":
     st.markdown('<div class="main-title">📖 Comprehensive Parameter Knowledge Base</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-title">Detailed Definitions, Listener Impact, and Validated Fixes for All 7 Parameters</div>', unsafe_allow_html=True)
     
@@ -544,7 +559,7 @@ elif app_mode == "📖 Parameter Guide & Step-by-Step Fixes":
 # ==============================================================================
 # 3. PAGE: REFERENCE HALL OF FAME
 # ==============================================================================
-elif app_mode == "🏆 Reference Hall of Fame (Top Audiobooks)":
+elif app_mode == "🏆 Knowledge: Reference Hall of Fame":
     st.markdown('<div class="main-title">🏆 Audiobook Quality Hall of Fame</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-title">Top Performing Audiobooks Across AWGP, Yagyavalkya, and Global Publishing Channels</div>', unsafe_allow_html=True)
     
@@ -704,7 +719,7 @@ elif app_mode == "🏆 Reference Hall of Fame (Top Audiobooks)":
 # ==============================================================================
 # 4. PAGE: AUDACITY 1-CLICK MACRO & PRESETS
 # ==============================================================================
-elif app_mode == "📋 1-Click Audacity Macro & Presets":
+elif app_mode == "📋 Preset: 1-Click Audacity Macro":
     st.markdown('<div class="main-title">📋 1-Click Audacity Macro & Presets</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-title">Automate Complete Audiobook Mastering in Audacity with a Single Click</div>', unsafe_allow_html=True)
     
@@ -780,3 +795,248 @@ elif app_mode == "📋 1-Click Audacity Macro & Presets":
         <p style="margin:4px 0 0 0; color:#374151;"><code>Limiter: limit="-3" type="SoftLimit"</code> eliminates all digital clipping and distortion permanently.</p>
     </div>
     """, unsafe_allow_html=True)
+
+
+# ==============================================================================
+# ==============================================================================
+# 5. PAGE: PRE-FLIGHT MIC & ROOM ACOUSTICS CHECK (FOR NARRATORS)
+# ==============================================================================
+elif app_mode == "STAGE 1: 🎙️ Pre-Flight Mic & Room Check":
+    st.markdown('<div class="main-title">🎙️ Pre-Flight Mic & Room Acoustics Checker</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-title">Quick 5-15s diagnostic to verify mic gain, fan/room noise, SNR & rumble before starting your recording session.</div>', unsafe_allow_html=True)
+    
+    st.info("💡 **Instructions for Narrators:** Record a 5-15s audio clip (e.g. speak 1 sentence and leave 3-5s of room silence). The tool will detect fan noise, mic gain, and room readiness.")
+    
+    mic_file = st.file_uploader("Upload 5-15s Mic Test Sample (M4A, WAV, MP3, AAC, FLAC)", type=["wav", "mp3", "m4a", "flac", "ogg", "aac"], key="mic_check_uploader")
+    if mic_file:
+        with tempfile.NamedTemporaryFile(suffix=os.path.splitext(mic_file.name)[1], delete=False) as tf:
+            tf.write(mic_file.getvalue())
+            tmp_p = tf.name
+        try:
+            y, sr = robust_load_audio(tmp_p, sr=None, mono=True)
+            res = analyze_mic_check(y, sr)
+            
+            st.markdown(f"### 📋 Readiness Verdict: {res['status_label']}")
+            if res["status"] == "READY":
+                st.success("🟢 **STUDIO READY:** Microphone levels and background noise meet professional audiobook standards.")
+            elif res["status"] == "WARNING":
+                st.warning("🟡 **AUDIBLE ROOM NOISE / FAN DETECTED:** Background noise is audible. Please review the action items below.")
+            else:
+                st.error("🔴 **RECORDING BLOCKED:** Excessive background noise, severe fan hum, or clipping detected.")
+                
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Peak Level", f"{res['peak_db']:.1f} dBFS", help="Ideal: -12 to -3 dBFS")
+            col2.metric("Room Noise Floor", f"{res['noise_floor_db']:.1f} dBFS", help="Audiobook standard requires <= -60 dBFS. Home fans typically register -45 to -55 dBFS.")
+            col3.metric("Signal-to-Noise (SNR)", f"{res['snr_db']:.1f} dB", help="Ideal: >= 38 dB")
+            col4.metric("Fan / Motor Hum", f"{res['fan_hum_pct']:.1f}%", help="Energy in 50Hz-600Hz motor band")
+            
+            st.markdown("### 🛠️ Acoustic Diagnostic & Action Items")
+            for advice in res["advice"]:
+                st.markdown(f"- {advice}")
+                
+            st.markdown("---")
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.markdown(f"**Low-End Rumble (<80Hz):** `{res['rumble_pct']:.1f}%`")
+                st.progress(min(1.0, res['rumble_pct'] / 30.0))
+            with col_b:
+                st.markdown(f"**Voice Presence (1-4kHz):** `{res['presence_pct']:.1f}%`")
+                st.progress(min(1.0, res['presence_pct'] / 40.0))
+        finally:
+            if os.path.exists(tmp_p):
+                os.remove(tmp_p)
+
+# ==============================================================================
+# 6. PAGE: ACX & MULTI-PLATFORM COMPLIANCE MATRIX (FOR CHECKERS / PUBLISHERS)
+# ==============================================================================
+elif app_mode == "STAGE 5: 📊 Multi-Platform Compliance Matrix":
+    st.markdown('<div class="main-title">📊 Multi-Platform Compliance Matrix</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-title">Instant simultaneous verification against Audible ACX, Spotify Audiobooks, YouTube / Web Audio, and AWGP Master standards.</div>', unsafe_allow_html=True)
+    
+    comp_file = st.file_uploader("Upload Mastered Audio File to Certify Across All Standards", type=["wav", "mp3", "m4a", "flac", "aac", "ogg"], key="comp_uploader")
+    
+    if comp_file:
+        with tempfile.NamedTemporaryFile(suffix=os.path.splitext(comp_file.name)[1], delete=False) as tf:
+            tf.write(comp_file.getvalue())
+            tmp_p = tf.name
+        try:
+            with st.spinner("Screening audio against all industry distribution standards..."):
+                y, sr = robust_load_audio(tmp_p, sr=None, mono=True)
+                metrics, score, subscores = analyze_audio_data(y, sr)
+                pause_data = analyze_pauses_and_silences(y, sr)
+                
+                # Run validation across all standards
+                results = {}
+                for platform_name in PLATFORM_STANDARDS.keys():
+                    results[platform_name] = validate_platform_compliance(
+                        metrics=metrics,
+                        head_silence_s=pause_data["head_silence_s"],
+                        tail_silence_s=pause_data["tail_silence_s"],
+                        sample_rate=sr,
+                        platform_name=platform_name
+                    )
+                
+                st.markdown("### 🏆 Overall Multi-Platform Status Summary")
+                cols = st.columns(len(results))
+                for i, (plat_name, res) in enumerate(results.items()):
+                    with cols[i]:
+                        if res["all_pass"]:
+                            st.success(f"**{plat_name}**\n\n🟢 **COMPLIANT (100%)**")
+                        else:
+                            failed_count = sum(1 for c in res["checks"] if not c["passed"])
+                            st.error(f"**{plat_name}**\n\n🔴 **FAILED ({failed_count} Issues)**")
+                            
+                st.markdown("---")
+                st.markdown("### 📋 Detailed Standards Breakdown")
+                
+                # Tabbed view for each standard
+                tabs = st.tabs(list(results.keys()))
+                for i, (plat_name, res) in enumerate(results.items()):
+                    with tabs[i]:
+                        if res["all_pass"]:
+                            st.success(f"🎉 **CERTIFIED COMPLIANT:** This file satisfies 100% of all specifications for **{plat_name}**.")
+                        else:
+                            st.error(f"❌ **NON-COMPLIANT:** One or more critical specifications failed for **{plat_name}**.")
+                            
+                        # Render table-like format for checks
+                        for c in res["checks"]:
+                            status_badge = "🟢 PASS" if c["passed"] else ("🔴 CRITICAL FAIL" if c["severity"] == "CRITICAL" else "🟡 WARNING")
+                            with st.container():
+                                col_p1, col_p2, col_p3 = st.columns([3, 3, 2])
+                                col_p1.markdown(f"**{c['parameter']}**")
+                                col_p2.markdown(f"Measured: `{c['measured']}`\n\n*(Required: {c['required']})*")
+                                col_p3.markdown(f"**{status_badge}**")
+                                st.markdown("<hr style='margin: 0.4rem 0; border: none; border-top: 1px solid #E5E7EB;'>", unsafe_allow_html=True)
+        finally:
+            if os.path.exists(tmp_p):
+                os.remove(tmp_p)
+
+# ==============================================================================
+# 7. PAGE: SILENCE, HEAD/TAIL & PAUSE INSPECTOR (FOR EDITORS)
+# ==============================================================================
+elif app_mode == "STAGE 3: ⏱️ Silence & Pause Rhythm Inspector":
+    st.markdown('<div class="main-title">⏱️ Silence, Head/Tail & Pause Rhythm Inspector</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-title">Inspect chapter boundary timing, breath rhythm, and detect awkward long dead-air intervals.</div>', unsafe_allow_html=True)
+    
+    pause_file = st.file_uploader("Upload Chapter File for Timing Inspection", type=["wav", "mp3", "m4a", "flac"], key="pause_uploader")
+    if pause_file:
+        with tempfile.NamedTemporaryFile(suffix=os.path.splitext(pause_file.name)[1], delete=False) as tf:
+            tf.write(pause_file.getvalue())
+            tmp_p = tf.name
+        try:
+            y, sr = robust_load_audio(tmp_p, sr=None, mono=True)
+            p_data = analyze_pauses_and_silences(y, sr)
+            
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Head Silence", f"{p_data['head_silence_s']}s", help="Standard: 0.5s - 1.0s")
+            c2.metric("Tail Silence", f"{p_data['tail_silence_s']}s", help="Standard: 3.0s - 5.0s")
+            c3.metric("Normal Sentence Pauses", len(p_data["normal_pauses"]))
+            c4.metric("Excessive Gaps (>2.8s)", len(p_data["excessive_pauses"]))
+            
+            if p_data["excessive_pauses"]:
+                st.warning(f"⚠️ **{len(p_data['excessive_pauses'])} Excessive Gaps Detected:**")
+                for ep in p_data["excessive_pauses"]:
+                    st.markdown(f"- Timestamp: `{ep['start']}s` to `{ep['end']}s` (Duration: **{ep['duration']}s**)")
+            else:
+                st.success("✅ No unnatural excessive gaps detected in narration flow.")
+        finally:
+            if os.path.exists(tmp_p):
+                os.remove(tmp_p)
+
+# ==============================================================================
+# ==============================================================================
+# 8. PAGE: 1-CLICK AUDIOBOOK DSP AUTO-MASTER (FOR EDITORS)
+# ==============================================================================
+elif app_mode == "STAGE 4: 🎚️ 1-Click DSP Master & De-Noise":
+    st.markdown('<div class="main-title">🎚️ 1-Click Audiobook DSP Auto-Master & AI De-Noise</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-title">All-in-One Python DSP Studio: Intelligent Spectral Noise Reduction, 80Hz High-Pass, Vocal EQ Presence, Auto-Padded Head/Tail, and EBU R128 Normalization.</div>', unsafe_allow_html=True)
+    
+    m_file = st.file_uploader("Upload Recorded Audio Track to Master (M4A, WAV, MP3, AAC, FLAC)", type=["wav", "mp3", "m4a", "flac", "aac", "ogg"], key="master_uploader")
+    if m_file:
+        col_opt1, col_opt2, col_opt3 = st.columns(3)
+        with col_opt1:
+            target_lufs = st.slider("Target Loudness (LUFS)", min_value=-24.0, max_value=-16.0, value=-20.0, step=0.5, help="Audible/ACX standard is -20 LUFS")
+        with col_opt2:
+            nr_strength = st.slider("Spectral Noise Reduction Strength", min_value=0.0, max_value=1.0, value=0.80, step=0.05, help="Removes fan, AC hum, and preamp hiss without vocal degradation")
+        with col_opt3:
+            enable_eq = st.checkbox("Apply Vocal Presence & De-Mud EQ", value=True)
+            fix_ht = st.checkbox("Auto-Pad Head (0.75s) & Tail (3.5s) Silence", value=True)
+            
+        if st.button("🚀 Auto-Master & De-Noise Audio"):
+            with st.spinner("Processing Spectral Noise Gating, EQ, Normalization & Limiter..."):
+                with tempfile.NamedTemporaryFile(suffix=os.path.splitext(m_file.name)[1], delete=False) as tf:
+                    tf.write(m_file.getvalue())
+                    tmp_p = tf.name
+                try:
+                    y, sr = robust_load_audio(tmp_p, sr=None, mono=True)
+                    mastered = auto_master_audio(
+                        y,
+                        sr,
+                        target_lufs=target_lufs,
+                        target_peak_db=-3.0,
+                        highpass_hz=80.0,
+                        noise_reduce_amount=nr_strength,
+                        apply_vocal_eq=enable_eq,
+                        fix_head_tail=fix_ht
+                    )
+                    
+                    st.success("🎉 **Mastering & Noise Reduction Completed Successfully!**")
+                    
+                    mc1, mc2, mc3 = st.columns(3)
+                    mc1.metric("Loudness (LUFS)", f"{mastered['final_lufs']:.1f} LUFS", delta=f"{mastered['final_lufs'] - mastered['initial_lufs']:+.1f} LUFS")
+                    mc2.metric("True Peak", f"{mastered['final_peak_db']:.2f} dBFS", delta="Ceiling ≤ -3.0 dBFS")
+                    mc3.metric("Noise Floor Cleared", f"{mastered['final_noise_floor']:.1f} dBFS", delta=f"-{mastered['noise_reduction_db']:.1f} dB Noise Cut", delta_color="inverse")
+                    
+                    st.markdown("#### 🎧 Listen to Mastered Output:")
+                    st.audio(mastered["audio_bytes"], format="audio/wav")
+                    
+                    st.download_button(
+                        label="📥 Download Mastered & Cleaned Audio (.WAV)",
+                        data=mastered["audio_bytes"],
+                        file_name=f"mastered_cleaned_{os.path.splitext(m_file.name)[0]}.wav",
+                        mime="audio/wav"
+                    )
+                finally:
+                    if os.path.exists(tmp_p):
+                        os.remove(tmp_p)
+
+# 9. PAGE: METADATA & CHAPTER ID3 TAGGING STUDIO (FOR PUBLISHERS)
+# ==============================================================================
+elif app_mode == "STAGE 6: 🏷️ Metadata & Chapter Tagging Studio":
+    st.markdown('<div class="main-title">🏷️ Metadata & Chapter ID3 Tagging Studio</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-title">Embed title, author, narrator, track number, and cover art into your audiobook MP3s.</div>', unsafe_allow_html=True)
+    
+    tag_file = st.file_uploader("Upload Audiobook MP3 File", type=["mp3"], key="tagging_uploader")
+    if tag_file:
+        col1, col2 = st.columns(2)
+        with col1:
+            book_title = st.text_input("Audiobook / Book Title", value="Gayatri Mahavigyan")
+            ch_title = st.text_input("Chapter / Track Title", value="Chapter 01 - Introduction")
+            author_name = st.text_input("Author", value="Pt. Shriram Sharma Acharya")
+        with col2:
+            narrator_name = st.text_input("Narrator / Artist", value="AWGP Voice Team")
+            track_num = st.number_input("Chapter / Track Number", min_value=1, value=1)
+            pub_year = st.text_input("Release Year", value="2026")
+            
+        cover_file = st.file_uploader("Upload Cover Art (Optional JPG/PNG)", type=["jpg", "jpeg", "png"], key="cover_art_uploader")
+        
+        if st.button("🏷️ Apply Metadata & Embed Tags"):
+            cover_b = cover_file.getvalue() if cover_file else None
+            tagged_data = tag_audiobook_file(
+                input_bytes=tag_file.getvalue(),
+                file_ext="mp3",
+                title=ch_title,
+                author=author_name,
+                narrator=narrator_name,
+                album_book=book_title,
+                track_num=track_num,
+                year=pub_year,
+                cover_image_bytes=cover_b
+            )
+            st.success("✅ Metadata & Cover Art Embedded Successfully!")
+            st.download_button(
+                label="📥 Download Tagged MP3",
+                data=tagged_data,
+                file_name=f"tagged_{tag_file.name}",
+                mime="audio/mp3"
+            )

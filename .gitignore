@@ -9,3 +9,8 @@ __pycache__/
 build/
 dist/
 *.spec
+*.log
+*.txt
+*.sh
+all_results.txt
+amateurs_out.txt
